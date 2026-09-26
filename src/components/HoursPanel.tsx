@@ -1,11 +1,13 @@
-import { useAppData } from '@/lib/data';
-import { Card, CardHeader, CardTitle, CardContent } from '@/lib/ui/Card';
+import { useQuery } from '@tanstack/react-query';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/lib/ui/Card';
+import { Badge } from '@/lib/ui/Badge';
+import { EmptyState } from '@/lib/ui/EmptyState';
 import { CenteredSpinner } from '@/lib/ui/Spinner';
 import { Alert, AlertTitle, AlertDescription } from '@/lib/ui/Alert';
-import { EmptyState } from '@/lib/ui/EmptyState';
 import { Button } from '@/lib/ui/Button';
+import { Clock, RefreshCw } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/cn';
-import { Clock } from 'lucide-react';
 
 interface OpeningHour {
   id: string;
@@ -17,37 +19,39 @@ interface OpeningHour {
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-const MOCK_HOURS: OpeningHour[] = [
-  { id: '0', day_of_week: 0, open_time: '8:00 AM', close_time: '3:00 PM', is_closed: false },
-  { id: '1', day_of_week: 1, open_time: '7:00 AM', close_time: '6:00 PM', is_closed: false },
-  { id: '2', day_of_week: 2, open_time: '7:00 AM', close_time: '6:00 PM', is_closed: false },
-  { id: '3', day_of_week: 3, open_time: '7:00 AM', close_time: '6:00 PM', is_closed: false },
-  { id: '4', day_of_week: 4, open_time: '7:00 AM', close_time: '7:00 PM', is_closed: false },
-  { id: '5', day_of_week: 5, open_time: '7:00 AM', close_time: '7:00 PM', is_closed: false },
-  { id: '6', day_of_week: 6, open_time: '8:00 AM', close_time: '5:00 PM', is_closed: false },
-];
-
-async function fetchLive(): Promise<OpeningHour[]> {
-  throw new Error('not wired yet');
+function formatTime(t: string | null): string {
+  if (!t) return '';
+  const [hStr, mStr] = t.split(':');
+  const h = parseInt(hStr, 10);
+  const m = mStr ?? '00';
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m} ${period}`;
 }
 
 export function HoursPanel() {
-  const { data, isLoading, error, refetch } = useAppData<OpeningHour[]>({
-    key: ['opening_hours'],
-    mock: MOCK_HOURS,
-    fetchLive,
-  });
-
   const today = new Date().getDay();
-  const sorted = [...(data ?? [])].sort((a, b) => a.day_of_week - b.day_of_week);
+
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
+    queryKey: ['opening_hours'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('a_simple_landing_pag_opening_hours')
+        .select('id,day_of_week,open_time,close_time,is_closed')
+        .order('day_of_week', { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as OpeningHour[];
+    },
+  });
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Clock size={18} />
-          Opening Hours
+          Opening hours
         </CardTitle>
+        <CardDescription>Today highlighted below.</CardDescription>
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -55,31 +59,40 @@ export function HoursPanel() {
         ) : error ? (
           <Alert variant="destructive">
             <AlertTitle>Couldn't load hours</AlertTitle>
-            <AlertDescription className="flex items-center justify-between gap-4">
-              <span>{(error as Error).message}</span>
-              <Button size="sm" variant="outline" onClick={() => refetch()}>Retry</Button>
+            <AlertDescription className="space-y-3">
+              <p>{(error as Error).message}</p>
+              <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isFetching}>
+                <RefreshCw size={14} />
+                Try again
+              </Button>
             </AlertDescription>
           </Alert>
-        ) : sorted.length === 0 ? (
-          <EmptyState icon={<Clock size={20} />} title="Hours not set" description="We'll post our hours here soon." />
+        ) : !data || data.length === 0 ? (
+          <EmptyState
+            icon={<Clock size={20} />}
+            title="Hours not set yet"
+            description="Opening hours will appear here once configured."
+          />
         ) : (
           <ul className="divide-y divide-border">
-            {sorted.map((h) => {
+            {data.map((h) => {
               const isToday = h.day_of_week === today;
               return (
                 <li
                   key={h.id}
                   className={cn(
-                    'flex items-center justify-between gap-4 py-2.5 px-2 -mx-2 rounded-md text-small',
-                    isToday && 'bg-primary/10 border border-primary/30'
+                    'flex items-center justify-between gap-4 py-2.5 px-2 -mx-2 rounded-md',
+                    isToday && 'bg-muted'
                   )}
                 >
-                  <span className={cn('text-muted-foreground', isToday && 'font-medium text-foreground')}>
+                  <span className={cn('text-body', isToday ? 'text-foreground font-medium' : 'text-muted-foreground')}>
                     {DAY_NAMES[h.day_of_week]}
-                    {isToday && <span className="ml-2 text-micro text-primary">Today</span>}
+                    {isToday && (
+                      <Badge variant="success" className="ml-2 align-middle">Today</Badge>
+                    )}
                   </span>
-                  <span className={cn('tabular-nums text-muted-foreground', isToday && 'font-medium text-foreground')}>
-                    {h.is_closed ? 'Closed' : `${h.open_time} – ${h.close_time}`}
+                  <span className={cn('text-small tabular-nums', isToday ? 'text-foreground' : 'text-muted-foreground')}>
+                    {h.is_closed ? 'Closed' : `${formatTime(h.open_time)} – ${formatTime(h.close_time)}`}
                   </span>
                 </li>
               );

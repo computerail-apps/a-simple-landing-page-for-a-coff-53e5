@@ -5,6 +5,8 @@ import { Input } from '@/lib/ui/Input';
 import { Button } from '@/lib/ui/Button';
 import { Alert, AlertTitle, AlertDescription } from '@/lib/ui/Alert';
 import { Send, CheckCircle2 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { sendEmail, SHOP_OWNER_EMAIL } from '@/lib/email';
 
 interface ContactPayload {
   name: string;
@@ -12,8 +14,27 @@ interface ContactPayload {
   message: string;
 }
 
-async function submitContact(_payload: ContactPayload): Promise<{ ok: true }> {
-  throw new Error('not wired yet');
+async function submitContact(payload: ContactPayload): Promise<{ ok: true }> {
+  const { error } = await supabase.from('a_simple_landing_pag_contact_messages').insert({
+    name: payload.name,
+    email: payload.email,
+    message: payload.message,
+  });
+  if (error) throw error;
+
+  try {
+    await sendEmail({
+      to: SHOP_OWNER_EMAIL,
+      subject: `New inquiry from ${payload.name} — Fernwood Coffee`,
+      html: `<p><strong>Name:</strong> ${payload.name}</p><p><strong>Email:</strong> ${payload.email}</p><p><strong>Message:</strong></p><p>${payload.message.replace(/\n/g, '<br/>')}</p>`,
+      text: `Name: ${payload.name}\nEmail: ${payload.email}\nMessage: ${payload.message}`,
+    });
+  } catch (e) {
+    // The message is already persisted; surface the email issue but don't block success.
+    console.warn('Email notification failed:', (e as Error).message);
+  }
+
+  return { ok: true };
 }
 
 export function ContactForm() {
